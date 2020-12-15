@@ -16,8 +16,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-#%% --------- Load data
-df = pd.read_csv("Preprocessed_AirQuality.csv", index_col="Date", parse_dates=True)
+#%% ------------------------------------------------- Load data ------------------------------------------------------------
+df = pd.read_csv("../data/Preprocessed_AirQuality.csv", index_col="Date", parse_dates=True)
 target = "NO2(GT)"
 
 # splitting training and testing sets
@@ -25,7 +25,7 @@ df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
 train = df_train[target]
 test = df_test[target]
 
-#%% ----------------- Seasonal differencing -----------------------
+#%% ----------------------------------------------- Seasonal differencing --------------------------------------------------
 # at first, we take a seasonal differencing of the time series
 y = train.to_numpy()
 
@@ -47,13 +47,11 @@ ADF_Cal(rolling_mean)
 print("\nADF test for rolling variance:")
 ADF_Cal(rolling_var)
 
-#%% ------------------- 1st differencing -------------------------
+#%% --------------------------------------------------- 1st differencing ---------------------------------------------------
 # Since the time series is not stationary after seasonal differencing
 # We apply an additional 1st differencing
 
-
 y = differencing(y, lag = 1)
-
 
 # ADF test for seasonal differenced data
 rolling_mean = []
@@ -71,16 +69,16 @@ print("\nADF test for rolling variance:")
 ADF_Cal(rolling_var)
 
 # differencing terms: d = 1, D = 1
-#%% -------------------------- ACF, PCAF plot ---------------------------------
+#%% ------------------------------------------------- ACF, PCAF plot ------------------------------------------------------
 plt.figure()
-plot_acf(y, lags=50, title="ACF plot of differenced data")
+plot_acf(y, lags=100, title="Figure 17. ACF plot of differenced data")
 plt.xlabel("Lag")
 plt.ylabel("Magnitude")
 plt.show()
 
 
 plt.figure()
-plot_pacf(y, lags=50, title="PACF plot of differenced data")
+plot_pacf(y, lags=100, title="Figure 18. PACF plot of differenced data")
 plt.xlabel("Lag")
 plt.ylabel("Magnitude")
 plt.show()
@@ -88,9 +86,11 @@ plt.show()
 # seasonal terms:
 # a spike at lag 24 of ACF plot but no other spikes
 # exponential decay in the seasonal lags of the PACF at lag= 24, 48, ...
-# P = 0, Q = 1
+P = 0
+Q = 1
 
-#%% ------------------------ GPAC table
+#%% ------------------------------------------------ GPAC table ------------------------------------------------------------
+# use GPAC table to find non-seasonal terms
 lags = 20
 # ACF of y(t)
 acf = series_autocorrelation_cal(y, lags)
@@ -106,23 +106,24 @@ table = GPAC_cal(Ry,8,8)
 # according to GPAC table:
 # possible non-seasonal AR order is 1
 # possible non-seasonal MA order is 1
-# p = 1, q = 1
+p = 1
+q = 1
 
-#%% -------------------------- SARIMA model
+#%% --------------------------------------------------- SARIMA model ---------------------------------------------------------
 # SARIMA (1,1,1) (0,1,1)24
 my_non_seasonal_order = (1,1,1)
 my_seasonal_order = (0,1,1,24)
 
-model = SARIMAX(train, order = my_non_seasonal_order, seasonal_order = my_seasonal_order)
+model = SARIMAX(train, order = my_non_seasonal_order, seasonal_order = my_seasonal_order, measurement_error=True)
 model_fit = model.fit()
 
-#%% --------------- Forecasting
+#%% ------------------------------------------------------ Forecasting -----------------------------------------------------
 forecast = model_fit.forecast(len(test))
 
-#%% --------------- Prediction
+#%% ------------------------------------------------------ Prediction --------------------------------------------------
 prediction = model_fit.predict(start = train.index[0], end = train.index[len(train)-1])
 
-#%% ---------------- plot
+#%% -------------------------------------------------- Plot predictions and forecasts --------------------------------------
 # plot the prediction
 plt.figure()
 plt.plot(train[-100:], label ="Training data")
@@ -132,32 +133,42 @@ plt.plot(forecast[:200], label="Forecasted values")
 plt.xlabel("Date")
 plt.xticks(rotation=30)
 plt.ylabel(target)
-plt.title("Prediction of NO2 concentration using SARIMA (1,1,1) (0,1,1)24")
+plt.title("Figure 19. NO2 concentration forecasting using SARIMA(1,1,1)(0,1,1)24")
 plt.legend(loc='best')
 plt.show()
 
-#%% -------------- Stats
+#%% ------------------------------------------ Evaluation metrics ----------------------------------------------------------
+# training set
 residual = np.array(train) - np.array(prediction) # residuals
-error = np.array(test) - np.array(forecast) # forecasted errors
-
-# mean of residuals, MSE, estimated variance
 SSE_train = np.square(residual).sum()
 MSE_train = np.square(residual).mean()
+est_var_train = SSE_train/(len(train)-p-q-P-Q)
 print("MSE of fitted values is: ", MSE_train)
 print("Mean of residuals is: ", np.mean(residual))
-est_var_train = np.sqrt(SSE_train/(len(train)-3))
 print("The estimated variance of residuals is:", est_var_train )
+print("Variance of residuals is:", np.var(residual))
 
-
+# testing set
+error = np.array(test) - np.array(forecast) # forecasted errors
 SSE_test = np.square(error).sum()
 MSE_test = np.square(error).mean()
+est_var_test = SSE_test/(len(test)-p-q-P-Q)
 print("MSE of testing set is: ", MSE_test)
 print("Mean of forecasted errors is: ", np.mean(error))
-
-est_var_test = np.sqrt(SSE_test/(len(test)-3))
 print("The estimated variance of forecasted errors is:", est_var_test )
-
-#%%
-
-print("Variance of residuals is:", np.var(residual))
 print("Variance of errors is:", np.var(error))
+
+#%% ---------------------------------- ACF plot for residuals ----------------------------------------------------------
+# acf plot and Q value
+h = 48
+title = "Figure 20. ACF plot of residuals using SARIMA model"
+ACF_plot(residual, 20, title)
+Q_val = Q_val_cal(residual, h, len(test))
+print("Q-value of residuals is: ", Q_val)
+DOF = h - p - q - P - Q
+alpha = 0.05
+critical_Q = stats.chi2.ppf(1-alpha, DOF)
+print("Critical Q-value = ", critical_Q)
+
+#%% ----------------------------------- Summary of SARIMA --------------------------------------------------------------
+print(model_fit.summary())

@@ -7,14 +7,14 @@ register_matplotlib_converters()
 from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.seasonal import STL
 from statsmodels.graphics.tsaplots import acf, plot_pacf, plot_acf
-from MyFunctions import ADF_Cal, Q_val_cal, ACF_plot, autocorrelation_cal, series_autocorrelation_cal, ts_strength
+from MyFunctions import ADF_Cal, ACF_plot, autocorrelation_cal, series_autocorrelation_cal, ts_strength
 from sklearn.model_selection import train_test_split
 import warnings
 warnings.filterwarnings("ignore")
 
 #%% ------------------------------------ Load dataset -------------------------------------------------------------------
 # read the preprocessed dataset
-df = pd.read_csv("Preprocessed_AirQuality.csv", index_col="Date", parse_dates=True)
+df = pd.read_csv("../data/Preprocessed_AirQuality.csv", index_col="Date", parse_dates=True)
 
 # get the target variable
 target = "NO2(GT)"
@@ -26,7 +26,7 @@ df_train, df_test = train_test_split(df, test_size=0.2, shuffle=False)
 ts = df_train[target]
 
 
-#%% -------------------------------------- Visualization of the time series -----------------------------------------------
+#%% ----------------------------------------- Visualization of the time series -----------------------------------------------
 # plot first 300 samples
 fig, ax = plt.subplots()
 ax.plot(ts[:300])
@@ -34,14 +34,30 @@ ax.xaxis.set_tick_params(reset=True)
 ax.xaxis.set_major_locator(mdates.HourLocator(interval=48))
 ax.xaxis.set_major_formatter(mdates.DateFormatter("%b/%d-%H"))
 plt.setp(ax.get_xticklabels(), rotation=30, fontsize = 10)
-plt.title("Hourly averaged NO2 concentration of 300 samples", fontsize = 15)
+plt.title("Figure 1. Hourly averaged NO2 concentration of 300 samples")
 plt.xlabel("Date")
 plt.ylabel(target + " concentration in microg/m^3")
 plt.show()
 
-#%% ------------------------------------------ ADF test for stationarity ----------------------------------------------------------------
+#%% ------------------------------------------ ACF/PACF plot -----------------------------------------------------------
 y = ts.to_numpy() # convert to np.array
 
+# ACF
+plt.figure()
+plot_acf(y, lags=48, title="Figure 2. ACF plot of the time series")
+plt.xlabel("Lag")
+plt.ylabel("Magnitude")
+plt.show()
+
+# PACF
+plt.figure()
+plt.figure()
+plot_pacf(y, lags=48, title="PACF plot of the time series")
+plt.xlabel("Lag")
+plt.ylabel("Magnitude")
+plt.show()
+
+#%% ------------------------------------------ ADF test for stationarity ----------------------------------------------------------------
 # calculation of rolling mean and rolling variance
 rolling_mean = []
 rolling_var = []
@@ -69,7 +85,7 @@ fig.axes[2].set_xticks([], [])
 fig.axes[3].xaxis.set_major_locator(mdates.HourLocator(interval=48))
 fig.axes[3].xaxis.set_major_formatter(mdates.DateFormatter("%m-%d-%H:00"))
 plt.setp(fig.axes[3].get_xticklabels(), rotation=30, fontsize=7)
-plt.suptitle("STL decomposition for 1000 training samples ")
+plt.suptitle("Figure 3. STL decomposition (showing 1000 samples)")
 plt.xlabel("Date")
 plt.show()
 

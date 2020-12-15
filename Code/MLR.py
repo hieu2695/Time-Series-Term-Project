@@ -12,20 +12,19 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-#%%----------
-data = pd.read_csv("Preprocessed_AirQuality.csv", index_col="Date", parse_dates=True)
-target = "NO2(GT)"  # target variable
-features = np.setdiff1d(data.columns, [target]).tolist()   # features
+#%%------------------------------------- Data preparation -------------------------------------------------------------------
+# load data
+data = pd.read_csv("../data/Preprocessed_AirQuality.csv", index_col="Date", parse_dates=True)
 
-
-
-
-#%% Splitting
+target = "NO2(GT)"  ## target variable
+features = np.setdiff1d(data.columns, [target]).tolist()   ## features
+mete_features = ["T", "RH", "AH"]     ## meteorological variables
 
 # split the data into training and testing sets
 df_train, df_test = train_test_split(data, shuffle=False, test_size=0.2)
 
-#%% ----- Scaling
+#%% ----------------------------------------- Standardizing data --------------------------------------------------------
+# since the variables are not in the same scale, we need to standardize them
 # The StandardScaler
 ss = StandardScaler()
 # fit and standardize the training data
@@ -33,7 +32,7 @@ train = pd.DataFrame(ss.fit_transform(df_train), columns=df_train.columns)
 # apply standardization to testing data
 test = pd.DataFrame(ss.transform(df_test), columns=df_test.columns)
 
-#%% Getting feature matrix and target variable
+#%%  --------------------------------------- Getting feature matrix and target variable --------------------------------
 X_train = train[features] # getting the feature matrix for the training set
 Y_train = train[target] # the target variable for the training set
 
@@ -41,21 +40,21 @@ X_test = test[features]  # getting the feature matrix for the testing set
 Y_test = test[target] # the target variable for the testing set
 
 
-#%% ------------ Correlation
-
+#%% --------------------------------------------- Correlation matrix ----------------------------------------------------
+# plot the correlation matrix to observe the relationships between the target variable and the features
 # correlation matrix
 corr_matrix = data.corr()
-
 # plt correlation matrix
 ax = sns.heatmap(corr_matrix,vmin =-1, vmax=1, center=0,
             cmap=sns.diverging_palette(20,220,n=200),
             square = True, annot = False)
+plt.title("Figure 9. Correlation matrix")
 bottom, top =ax.get_ylim()
 ax.set_ylim(bottom+0.5,top-0.5)
 ax.set_xticklabels(ax.get_xticklabels(), rotation = 45, horizontalalignment='right')
 plt.show()
 
-#%% -------------- Mannual LME using normal equation
+#%% ----------------------------- Estimate the coefficients of MLR using normal equation -------------------------------
 # number of samples
 T = X_train.shape[0]
 # number of features
@@ -87,19 +86,33 @@ for var in X_train.columns:
     print("The coefficient of "+var+" is: ", B[count,0])
     count = count +1
 
-#%% using OLS
+#%% ----------------------------------------------- MLR using OLS command ----------------------------------------------
 # since the model need an intercept, we add a column of 1s to X_train
 X_train = sm.add_constant(X_train)
 
 # fit the model to training set
 model = sm.OLS(Y_train, X_train).fit()
 
+# evaluation metrics
 print("\n",model.summary(),"\n")
 print("Adj R2 : ", model.rsquared_adj)
 print("AIC : ", model.aic)
 print("BIC : ", model.bic)
 
-# forecast testing set
+#%% --------------------------------------------- Predictions & Forecasts ----------------------------------------------
+# predictions
+predictions = model.predict(X_train)
+
+# transform predictions to original scale
+train_copy = train.copy(deep=True)
+train_copy[target] = predictions
+train_copy = pd.DataFrame(ss.inverse_transform(train_copy),
+                              columns=train_copy.columns)
+# getting fitted values
+predictions = train_copy[target]
+
+# ======================================================================================================================
+# forecasts
 X_test = sm.add_constant(X_test)
 forecasts = model.predict(X_test)
 
@@ -108,66 +121,55 @@ test_copy = test.copy(deep=True)
 test_copy[target] = forecasts
 test_copy = pd.DataFrame(ss.inverse_transform(test_copy),
                               columns=test_copy.columns)
+# getting forecasts in the original scale
 forecasts = test_copy[target]
 
-#%%
-# plot the prediction
+# plot the predictions and forecasts
 inds = data.index
 train_inds, test_inds = train_test_split(inds, test_size=0.2, shuffle=False)
 plt.figure()
 plt.plot(train_inds[-100:], df_train[target][-100:], label ="Training set")
+plt.plot(train_inds[-100:], predictions[-100:], label ="Predictions")
 plt.plot(test_inds[:200],df_test[target][:200], label="Testing set")
-plt.plot(test_inds[:200],forecasts[:200], label="LSE forecasts")
+plt.plot(test_inds[:200],forecasts[:200], label="Forecasts")
 plt.xlabel("Date")
 plt.xticks(rotation=30)
 plt.ylabel(target)
-plt.title("Forecasting of NO2 concentration using LSE")
+plt.title("Forecasting of NO2 concentration using MLR")
 plt.legend(loc='best')
 plt.show()
 
-#%% --------------- Forecast Errors
+#%% ------------------------------------ Forecasted Errors and Residuals -----------------------------------------------
+# errors
 errors =  np.array(df_test[target]) -np.array(forecasts)
 SSE_test = np.square(errors).sum()
 MSE_test = np.square(errors).mean()
-
-print("MSE of forecasted values using LME is: ", MSE_test)
-
-
-#%% -------------- Residuals
-predictions = model.predict(X_train)
-
-# transform forecasts to original scale
-train_copy = train.copy(deep=True)
-train_copy[target] = predictions
-train_copy = pd.DataFrame(ss.inverse_transform(train_copy),
-                              columns=train_copy.columns)
-predictions = train_copy[target]
+est_var_test = SSE_test/(len(Y_test)-k-1)
 
 # residuals
 residuals =  np.array(df_train[target]) -np.array(predictions)
-
 SSE_train = np.square(residuals).sum()
 MSE_train = np.square(residuals).mean()
-print("MSE of fitted values using LME is: ", MSE_train)
+est_var_train = SSE_train/(T-k-1)
+
+# print statistics
 print("Mean of residuals is: ", np.mean(residuals))
+print("MSE of fitted values using LME is: ", MSE_train)
+print("MSE of forecasted values using LME is: ", MSE_test)
+print("The estimated variance of prediction errors is:", est_var_train)
+print("The estimated variance of forecast errors is:", est_var_test)
+print("The variance of residuals is:", np.var(residuals))
+print("The variance of forecast errors is:", np.var(errors))
 
-
-#%% Stats
-
-est_var_train = np.sqrt(SSE_train/(T-k-1))
-print(" The estimated variance of prediction errors is:", est_var_train )
-est_var_test = np.sqrt(SSE_test/(len(Y_test)-k-1))
-print(" The estimated variance of forecast errors is:", est_var_test )
-
-
-#%%
+#%% --------------------------------------- Diagnostics for Residuals ---------------------------------------------------
+# ACF plot
 title = "ACF plot for residuals"
 h = 48
 ACF_plot(residuals,h, title)
 Q_val = Q_val_cal(residuals, h,T)
 print("Q-value of residuals is: ", Q_val)
 
-#%% residual plot
+# Fitted values vs True values
 r = corr_cal(np.array(predictions),np.array(df_train[target]))
 plt.figure()
 sns.regplot(np.array(predictions), np.array(df_train[target]), label="Predictions vs Targets",line_kws={"color": "red"})
@@ -176,7 +178,7 @@ plt.xlabel("True values")
 plt.ylabel("Fitted values")
 plt.show()
 
-
+# Residuals vs Fitted values
 r = corr_cal(np.array(predictions),residuals)
 plt.figure()
 sns.regplot(np.array(predictions), residuals, label="Predictions vs Residuals",line_kws={"color": "red"})
@@ -185,7 +187,7 @@ plt.xlabel("Fitted values")
 plt.ylabel("Residuals")
 plt.show()
 
-#%%--- Backward stepwise using AIC, BIC, Adj R2 ----------------
+#%% ----------------------------------- Backward stepwise using AIC, BIC, Adj R2 ---------------------------------------
 # create a deep copy of the training set so updates wont affect the original data.
 Xtrain = X_train.copy(deep=True)
 AIC = model.aic
@@ -225,7 +227,7 @@ print("Adj R2 : ", model.rsquared_adj)
 print("AIC : ", model.aic)
 print("BIC : ", model.bic)
 
-#%% ----------- Backward stepwise using p-values of t-test ---------
+#%% ------------------------------------ Backward stepwise using p-values of t-test ------------------------------------
 print("\nBackward stepwise using t-test p_values:\n")
 Xtrain = X_train.copy(deep=True) # copy the original training set
 alpha = 0.05 # significant level aplha - confident level = 95%
@@ -259,10 +261,11 @@ print("Adj R2 : ", model.rsquared_adj)
 print("AIC : ", model.aic)
 print("BIC : ", model.bic)
 
-#%%-------------- Forward stepwise using AIC, BIC, Adj R2 ------
-Xtrain = X_train[X_train.columns[0]].copy(deep=True)
-# retrain the new model
+#%% --------------------------------------- Forward stepwise using AIC, BIC, Adj R2 ------------------------------------
+Xtrain = X_train[X_train.columns[0]].copy(deep=True) # intercept
+# retrain the intercept model
 model1 = sm.OLS(Y_train, Xtrain).fit()
+# metrics
 AIC = model1.aic
 BIC = model1.bic
 R2 = model1.rsquared_adj
@@ -295,12 +298,10 @@ print("Adj R2 : ", model1.rsquared_adj)
 print("AIC : ", model1.aic)
 print("BIC : ", model1.bic)
 
-#%% ----------- Forward stepwise using p-values of t-test ---------
+#%% ----------------------------------- Forward stepwise using p-values of t-test ---------------------------------------
 print("\nForward stepwise using t-test p_values:\n")
 alpha = 0.05 # significant level aplha - confident level = 95%
-Xtrain = X_train[X_train.columns[0]].copy(deep=True)
-
-
+Xtrain = X_train[X_train.columns[0]].copy(deep=True) # intercept
 feature_opt = []
 feature_opt.append(X_train.columns[0])
 feature_not_add = []
@@ -328,11 +329,30 @@ print("Adj R2 : ", model1.rsquared_adj)
 print("AIC : ", model1.aic)
 print("BIC : ", model1.bic)
 
-#%% ---------------- Evaluation ------------------
-# forecast testing set
+#%% -------------------------------------------- Evaluation ------------------------------------------------------------
+# After feature selection, the best model is from backward stepwise regression
+# remaining features after feature selection
 features = [x for x in X_test.columns if x not in features_to_be_eliminated]
+
+# getting new feature matrix
+X_train = X_train[features]
 X_test = X_test[features]
-X_test = sm.add_constant(X_test)
+
+#%% --------------------------------------------- Predictions & Forecasts ----------------------------------------------
+# predictions
+predictions = model.predict(X_train)
+
+# transform predictions to original scale
+train_copy = train.copy(deep=True)
+train_copy[target] = predictions
+train_copy = pd.DataFrame(ss.inverse_transform(train_copy),
+                              columns=train_copy.columns)
+# getting fitted values
+predictions = train_copy[target]
+
+# ======================================================================================================================
+# forecasts
+#X_test = sm.add_constant(X_test)
 forecasts = model.predict(X_test)
 
 # transform forecasts to original scale
@@ -340,79 +360,175 @@ test_copy = test.copy(deep=True)
 test_copy[target] = forecasts
 test_copy = pd.DataFrame(ss.inverse_transform(test_copy),
                               columns=test_copy.columns)
+# getting forecasts in the original scale
 forecasts = test_copy[target]
 
-#%%
-# plot the prediction
+# plot the predictions and forecasts
 inds = data.index
 train_inds, test_inds = train_test_split(inds, test_size=0.2, shuffle=False)
 plt.figure()
 plt.plot(train_inds[-100:], df_train[target][-100:], label ="Training set")
+plt.plot(train_inds[-100:], predictions[-100:], label ="Predictions")
 plt.plot(test_inds[:200],df_test[target][:200], label="Testing set")
-plt.plot(test_inds[:200],forecasts[:200], label="LSE forecasts")
+plt.plot(test_inds[:200],forecasts[:200], label="Forecasts")
 plt.xlabel("Date")
 plt.xticks(rotation=30)
 plt.ylabel(target)
-plt.title("Forecasting of NO2 concentration after feature selection")
+plt.title("Figure 4. Forecasting of NO2 concentration using MLR")
 plt.legend(loc='best')
 plt.show()
 
-#%% --------------- Forecast Errors
+#%% ------------------------------------ Forecasted Errors and Residuals -----------------------------------------------
+# errors
 errors =  np.array(df_test[target]) -np.array(forecasts)
 SSE_test = np.square(errors).sum()
 MSE_test = np.square(errors).mean()
-
-print("MSE of forecasted values using LME is: ", MSE_test)
-
-
-#%% -------------- Residuals
-predictions = model.predict(X_train[features])
-
-# transform forecasts to original scale
-train_copy = train.copy(deep=True)
-train_copy[target] = predictions
-train_copy = pd.DataFrame(ss.inverse_transform(train_copy),
-                              columns=train_copy.columns)
-predictions = train_copy[target]
+est_var_test = SSE_test/(len(Y_test)-k-1)
 
 # residuals
 residuals =  np.array(df_train[target]) -np.array(predictions)
-
 SSE_train = np.square(residuals).sum()
 MSE_train = np.square(residuals).mean()
-print("MSE of fitted values using LME is: ", MSE_train)
+est_var_train = SSE_train/(T-k-1)
+
+# print statistics
 print("Mean of residuals is: ", np.mean(residuals))
+print("MSE of fitted values using LME is: ", MSE_train)
+print("MSE of forecasted values using LME is: ", MSE_test)
+print("The estimated variance of prediction errors is:", est_var_train)
+print("The estimated variance of forecast errors is:", est_var_test)
+print("The variance of residuals is:", np.var(residuals))
+print("The variance of forecast errors is:", np.var(errors))
 
-
-#%% Stats
-
-est_var_train = np.sqrt(SSE_train/(T-k-1))
-print(" The estimated variance of prediction errors is:", est_var_train )
-est_var_test = np.sqrt(SSE_test/(len(Y_test)-k-1))
-print(" The estimated variance of forecast errors is:", est_var_test )
-
-
-#%%
-title = "ACF plot for residuals after feature selection"
+#%% --------------------------------------- Diagnostics for Residuals ---------------------------------------------------
+# ACF plot
+title = "Figure 5. ACF plot for residuals"
 h = 48
 ACF_plot(residuals,h, title)
 Q_val = Q_val_cal(residuals, h,T)
 print("Q-value of residuals is: ", Q_val)
 
-#%% residual plot
+# Fitted values vs True values
 r = corr_cal(np.array(predictions),np.array(df_train[target]))
 plt.figure()
 sns.regplot(np.array(predictions), np.array(df_train[target]), label="Predictions vs Targets",line_kws={"color": "red"})
-plt.title("True values vs Predictions with correlation r={:.4f}".format(r))
+plt.title("Figure 6. True values vs Predictions with correlation r={:.4f}".format(r))
 plt.xlabel("True values")
 plt.ylabel("Fitted values")
 plt.show()
 
-
+# Residuals vs Fitted values
 r = corr_cal(np.array(predictions),residuals)
 plt.figure()
 sns.regplot(np.array(predictions), residuals, label="Predictions vs Residuals",line_kws={"color": "red"})
-plt.title("Residuals vs Fitted values with correlation r={:.4f}".format(r))
+plt.title("Figure 7. Residuals vs Fitted values with correlation r={:.4f}".format(r))
+plt.xlabel("Fitted values")
+plt.ylabel("Residuals")
+plt.show()
+
+#%% -------------------------------- Realistic MLR using meteorological features --------------------------------------------------------------------------
+X_train = X_train[mete_features]
+X_train = sm.add_constant(X_train) # add column of 1s
+
+X_test = X_test[mete_features]
+X_test = sm.add_constant(X_test)
+
+# fit the model to training set
+model = sm.OLS(Y_train, X_train).fit()
+
+# evaluation metrics
+print("\n",model.summary(),"\n")
+print("Adj R2 : ", model.rsquared_adj)
+print("AIC : ", model.aic)
+print("BIC : ", model.bic)
+
+#%% --------------------------------------------- Predictions & Forecasts ----------------------------------------------
+# predictions
+predictions = model.predict(X_train)
+
+# transform predictions to original scale
+train_copy = train.copy(deep=True)
+train_copy[target] = predictions
+train_copy = pd.DataFrame(ss.inverse_transform(train_copy),
+                              columns=train_copy.columns)
+# getting fitted values
+predictions = train_copy[target]
+
+# ======================================================================================================================
+# forecasts
+forecasts = model.predict(X_test)
+
+# transform forecasts to original scale
+test_copy = test.copy(deep=True)
+test_copy[target] = forecasts
+test_copy = pd.DataFrame(ss.inverse_transform(test_copy),
+                              columns=test_copy.columns)
+# getting forecasts in the original scale
+forecasts = test_copy[target]
+
+# plot the predictions and forecasts
+inds = data.index
+train_inds, test_inds = train_test_split(inds, test_size=0.2, shuffle=False)
+plt.figure()
+plt.plot(train_inds[-100:], df_train[target][-100:], label ="Training set")
+plt.plot(train_inds[-100:], predictions[-100:], label ="Predictions")
+plt.plot(test_inds[:200],df_test[target][:200], label="Testing set")
+plt.plot(test_inds[:200],forecasts[:200], label="Forecasts")
+plt.xlabel("Date")
+plt.xticks(rotation=30)
+plt.ylabel(target)
+plt.title("Figure 8. MLR model using meteorological variables as predictors")
+plt.legend(loc='best')
+plt.show()
+
+#%% ------------------------------------ Forecasted Errors and Residuals -----------------------------------------------
+# errors
+errors =  np.array(df_test[target]) - np.array(forecasts)
+SSE_test = np.square(errors).sum()
+MSE_test = np.square(errors).mean()
+est_var_test = SSE_test/(len(Y_test)-k-1)
+
+# residuals
+residuals =  np.array(df_train[target]) - np.array(predictions)
+SSE_train = np.square(residuals).sum()
+MSE_train = np.square(residuals).mean()
+est_var_train = SSE_train/(T-k-1)
+
+# print statistics
+print("Mean of residuals is: ", np.mean(residuals))
+print("MSE of fitted values using LME is: ", MSE_train)
+print("MSE of forecasted values using LME is: ", MSE_test)
+print("The estimated variance of prediction errors is:", est_var_train)
+print("The estimated variance of forecast errors is:", est_var_test)
+print("The variance of residuals is:", np.var(residuals))
+print("The variance of forecast errors is:", np.var(errors))
+
+#%% --------------------------------------- Diagnostics for Residuals ---------------------------------------------------
+# ACF plot
+title = "ACF plot for residuals"
+h = 48
+ACF_plot(residuals,h, title)
+Q_val = Q_val_cal(residuals, h,T)
+print("Q-value of residuals is: ", Q_val)
+DOF = h - len(mete_features)
+alpha = 0.05
+critical_Q = stats.chi2.ppf(1-alpha, DOF)
+print("Critical Q-value = ", critical_Q)
+
+# Fitted values vs True values
+r = corr_cal(np.array(predictions),np.array(df_train[target]))
+plt.figure()
+sns.regplot(np.array(predictions), np.array(df_train[target]), label="Predictions vs Targets",line_kws={"color": "red"})
+plt.title("Figure 10. True values vs Predictions with correlation r={:.4f}".format(r))
+plt.xlabel("True values")
+plt.ylabel("Fitted values")
+plt.show()
+
+# Residuals vs Fitted values
+r = corr_cal(np.array(predictions),residuals)
+plt.figure()
+sns.regplot(np.array(predictions), residuals, label="Predictions vs Residuals",line_kws={"color": "red"})
+plt.title("Figure 11. Residuals vs Fitted values with correlation r={:.4f}".format(r))
 plt.xlabel("Fitted values")
 plt.ylabel("Residuals")
 plt.show()

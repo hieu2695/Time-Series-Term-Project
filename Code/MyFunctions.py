@@ -1,23 +1,30 @@
-#%% ------------------- Import
+#%% --------------------------------------------- Import --------------------------------------------------------------------------
 import pandas as pd
 import matplotlib.pyplot as plt
 import statsmodels.tsa.holtwinters as ets
-import statsmodels.api as sm
 import seaborn as sns
 import numpy as np
-from scipy import signal, stats
+from scipy import signal
 import copy
 import matplotlib.dates as mdates
 from pandas.plotting import register_matplotlib_converters
 register_matplotlib_converters()
-from sklearn.model_selection import train_test_split
 from statsmodels.tsa.stattools import adfuller
 import warnings
 warnings.filterwarnings("ignore")
 
-#%% ------------------------- Baseline models ---------------------------
 # correlation coefficient
 def corr_cal(x,y):
+    """
+    Parameters
+    ----------
+    x : data
+    y : data with the same length as x
+
+    Returns : the correlation coefficient between x and y
+    -------
+
+    """
     if len(x) != len(y):
         print("Two datasets do not have the same length. Recheck the datasets")
     else:
@@ -236,8 +243,8 @@ def simple_forecast_ts(train, test, method ,period):
             etest.append(error)
             setest.append(error**2)
 
-    elif method == "Holt's Linear Additive":
-        holt = ets.ExponentialSmoothing(ytrain, trend='add', damped=True, seasonal=None).fit()
+    elif method == "Holt's Linear":
+        holt = ets.ExponentialSmoothing(ytrain, trend=None, damped=False, seasonal=None).fit(smoothing_level=0.1)
         ytrain_hat = holt.fittedvalues
         ytest_hat = holt.forecast(steps=h)
 
@@ -250,25 +257,11 @@ def simple_forecast_ts(train, test, method ,period):
             etest.append(error)
             setest.append(error**2)
 
-    elif method == "Holt-Winter Seasonal Multiplicative":
-        holt = ets.ExponentialSmoothing(train, trend='multiplicative', damped=True, seasonal='multiplicative').fit()
-        ytrain_hat = holt.fittedvalues
-        ytrain_hat = ytrain_hat.values
-        ytest_hat = holt.forecast(steps=h)
-        ytest_hat = ytest_hat.values
-
-        for i in range(0, T):
-            error = ytrain[i] - ytrain_hat[i]
-            etrain.append(error)
-            setrain.append(error ** 2)
-        for i in range(0, h):
-            error = ytest[i] - ytest_hat[i]
-            etest.append(error)
-            setest.append(error ** 2)
 
 
-    elif method == "Holt-Winter Seasonal Additive":
-        holt = ets.ExponentialSmoothing(train, seasonal_periods=period, trend='add', damped=True, seasonal='add').fit()
+    elif method == "Holt-Winter":
+        holt = ets.ExponentialSmoothing(train, seasonal_periods=period, trend='add', damped_trend=True, seasonal='additive')
+        holt = holt.fit(smoothing_level=0.1,smoothing_seasonal=0.2, smoothing_trend=None)
         ytrain_hat = holt.fittedvalues
         ytrain_hat = ytrain_hat.values
         ytest_hat = holt.forecast(steps=h)
@@ -296,6 +289,7 @@ def simple_forecast_ts(train, test, method ,period):
 
     return df_train, df_test
 
+# Q value of Box-pierce test
 def Q_val_cal(y, lags, T):  # calculating the Q-value in Box-Pierce test
     """
     :param y: residuals
@@ -328,9 +322,10 @@ def forecasting_plot(train,test, method, xlabel, ylabel, interval, dateformat, p
 
     # plot the training, testing sets and forecasting values
     fig, ax = plt.subplots()
-    ax.plot(train[-100:], label = "train data")
-    ax.plot(test[:200], label ="test data")
-    ax.plot(test[:200].index,forecast["hat_y_t"][:200], label=method)
+    ax.plot(train[-100:], label = "Training data")
+    ax.plot(train[-100:].index, prediction["hat_y_t"][-100:], label="Predictions")
+    ax.plot(test[:200], label ="Testing data")
+    ax.plot(test[:200].index, forecast["hat_y_t"][:200], label="Forecasts")
 
     ax.xaxis.set_tick_params(reset=True)
     ax.xaxis.set_major_locator(mdates.DayLocator(interval=interval))
@@ -355,34 +350,43 @@ def stats(train, test, method, period):
     prediction = simple_forecast_ts(train, test, method, period)[0]
     forecast = simple_forecast_ts(train, test, method, period)[1]
 
-    # Mean square of forecast errors
-    MSE = np.mean(forecast["square_error"])
+    # Mean square of errors
+    MSE_test = np.mean(forecast["square_error"])
+    MSE_train = np.mean(prediction["square_error"])
 
     # variance of prediction and forecast errors
     pred_var = np.var(prediction["error"])
     forecast_var = np.var(forecast["error"])
 
+
     # Q value
-    T = len(test)
     lags = 48
-    Q = Q_val_cal(forecast["error"], lags, T)
+    res = prediction["error"][3:]
+    res = res.reset_index(drop=True)
+    T = len(res)
+    Q = Q_val_cal(res, lags, T)
 
     # correlation coefficient between forecast errors and the test set
     r = corr_cal(forecast["error"],test.values)
 
     print("\n")
-    print("The MSE of forecasts for " + method + " is: {:.4f}".format(MSE))
-    print("The variance of prediction errors for " + method + " is: {:.4f}".format(pred_var))
-    print("The variance of forecast errors for " + method + " is: {:.4f}".format(forecast_var))
-    print("The Q-value of Box-Pierce test on the forecast errors for " + method + " is: {:.4f}".format(Q))
-    print("The correlation coefficient between forecast errors and the testing data for " + method + " is: {:.4f}".format(r))
+    print("The mean of residuals is:", np.mean(res))
+    print("The MSE of predictions using " + method + " is: {:.4f}".format(MSE_train))
+    print("The MSE of forecasts using " + method + " is: {:.4f}".format(MSE_test))
+    print("The variance of prediction errors using " + method + " is: {:.4f}".format(pred_var))
+    print("The variance of forecast errors using " + method + " is: {:.4f}".format(forecast_var))
+    print("The Q-value of residuals using " + method + " is: {:.4f}".format(Q))
+    print("The correlation coefficient between forecast errors and the testing data using " + method + " is: {:.4f}".format(r))
+
 
 # define a function to plot ACF for forecast errors
 def ACF_error(method, train, test, period):
-    forecast = simple_forecast_ts(train, test, method, period)[1]
-    T = len(test)
+    prediction = simple_forecast_ts(train, test, method, period)[0]
+    res = prediction["error"][3:]
+    res = res.reset_index(drop=True)
+    T = len(res)
     lags = 20
-    ACF_plot(forecast["error"], lags, "The ACF plot of forecast errors using " + method)
+    ACF_plot(res, lags, "The ACF plot of residuals using " + method)
 
 
 # define the ADF-test calculation
@@ -395,15 +399,13 @@ def ADF_Cal(x):
     for key, value in result[4].items():
         print('\t%s: %.3f' % (key, value))
 
-# create a differencing method
+# differencing (default 1st differencing
 def differencing(y, lag=1):
 	diff = np.zeros(len(y)-lag)
 	for i in range(lag, len(y)):
 		diff[i-lag] = y[i] - y[i - lag]
 	return diff
 
-
-# ==========================================
 # define a function to calculate phi(j,kk) component of GPAC table
 def phi_cal(Ry, k, j):
     num = []
@@ -457,14 +459,14 @@ def GPAC_cal(Ry, K, J):
                      cmap=sns.diverging_palette(20, 220, n=200),
                      annot=True,fmt=".3f")
     ax.set_title("Generalized Partial Autocorrelation (GPAC) Table")
+    plt.xlabel("k")
+    plt.ylabel("j")
     plt.show()
 
     print("\nGPAC table:")
     print(table)
 
-# ARMA
-
-# LME function
+# Levenberg-Marquardt estimation
 def LME(y,na, nb, nepoch):
     var_e = 0.0
     cov_theta = 0.0
@@ -501,7 +503,6 @@ def LME(y,na, nb, nepoch):
             den_temp[i] = den[i] + delta
             sys = (den_temp, num, 1)
             _, e_theta = signal.dlsim(sys, y)
-            #print(e_theta)
             X[:, i - 1] = (e - e_theta)[:,0] / delta
 
         for i in range(1, nb + 1):
@@ -517,7 +518,7 @@ def LME(y,na, nb, nepoch):
         # step 2
         I = np.identity(n)
         delta_theta = np.dot(np.linalg.inv(A + u * I), g)
-        #print(delta_theta)
+
         # update coefficients
         den_new = copy.deepcopy(den)
         num_new = copy.deepcopy(num)
@@ -526,8 +527,6 @@ def LME(y,na, nb, nepoch):
 
         for i in range(1,nb+1):
             num_new[i] = num[i] + delta_theta[na:, :][i-1]
-        #print(den)
-        #print(num)
 
         sys = (den_new, num_new, 1)
         _, e_new = signal.dlsim(sys, y)
@@ -626,7 +625,7 @@ def h_step_ARMA(y_train, y_train_pred, length_test, a, b):
 
     return y_test_pred
 
-
+# strength of trend and seasonality
 def ts_strength(S, R, T):
     Ft = max([0, 1 - np.var(R)/np.var(T+R)])
     Fs = max([0, 1 - np.var(R)/np.var(S+R)])

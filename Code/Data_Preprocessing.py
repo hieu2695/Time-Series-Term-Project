@@ -2,10 +2,8 @@
 import numpy as np
 import pandas as pd
 
-
-
 #%% ------------------------------------ Load dataset ------------------------------------------------------------------
-
+# read the xlsx format of the dataset
 df = pd.read_excel("../data/AirQualityUCI.xlsx")
 
 
@@ -71,8 +69,7 @@ for var in df_miss['var']:
 print(nan_checker(df))
 
 #%% ------------------------------------- Handling Datetime Variable -----------------------------------------------------
-# we combinate the hour and the date into 1 column
-
+# we combine the hour and the date into 1 column
 hr = "00:00:00"
 for i in range(len(df)):
     # add hour to date
